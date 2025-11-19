@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timetable Sync Pro - Flask</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles to mirror the Angular component's appearance */
+        :root {
+            --color-indigo-600: #4f46e5;
+            --color-teal-500: #10b981;
+            --color-gray-200: #e5e7eb;
+        }
+
+        /* Step Indicator Styles */
+        .step-indicator {
+            border: 4px solid white;
+        }
+        .step-active {
+            background-color: var(--color-indigo-600); 
+            color: white;
+            transform: scale(1.1);
+            box-shadow: 0 0 0 6px rgba(79, 70, 229, 0.3);
+        }
+        .step-complete {
+            background-color: var(--color-teal-500);
+            color: white;
+        }
+        .step-inactive {
+            background-color: var(--color-gray-200);
+            color: #6b7280;
+        }
+
+        /* Loading Spinner Styling */
+        .loading-spinner {
+            border-radius: 50%;
+            width: 1.5rem;
+            height: 1.5rem;
+            animation: spin 1s linear infinite;
+            border: 4px solid #4f46e5;
+            border-top-color: white;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Custom Table Styles for Mobile */
+        @media (max-width: 767px) {
+            .timetable-table tr {
+                display: block;
+                margin-bottom: 1rem;
+                border: 1px solid #e5e7eb;
+                border-radius: 0.75rem;
+                box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+            }
+            .timetable-table td {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                border-bottom: 1px solid #f3f4f6;
+                text-align: right;
+            }
+            .timetable-table td:last-child {
+                border-bottom: none;
+                justify-content: center;
+            }
+            .timetable-table td input {
+                text-align: right;
+                border: none !important;
+                padding: 0.5rem 0 !important;
+                background-color: transparent !important;
+                box-shadow: none !important;
+            }
+        }
+    </style>
+</head>
+<body class="h-full font-sans antialiased">
+
+    <div id="app-container" class="min-h-screen font-inter">
+        <div id="main-content" class="bg-white min-h-screen flex flex-col items-center py-8 px-4 sm:px-6 lg:px-8">
+            <div class="w-full max-w-sm sm:max-w-xl md:max-w-3xl lg:max-w-5xl 
+                        bg-white rounded-3xl shadow-2xl p-6 sm:p-10 transition-all duration-300">
+          
+                <header class="text-center mb-10 flex flex-col items-center">
+                    <div class="mb-4">
+                        <h1 class="text-3xl sm:text-4xl font-black text-gray-800 tracking-tighter">
+                            Timetable <span class="text-indigo-600">Sync</span> Pro
+                        </h1>
+                        </div>
+                    </header>
+
+                <div class="flex justify-between items-center mb-12 relative">
+                    <div class="absolute w-full h-1 bg-gray-200 top-5 left-0 -z-10"></div>
+                    </div>
+
+                <div id="message-box" class="hidden mb-6 p-4 rounded-xl transition-all duration-300 shadow-inner" role="alert">
+                    </div>
+
+                <div id="step-views">
+                    
+                    <div id="step-1" class="space-y-8 p-4 hidden">
+                        <p class="text-gray-600 text-lg">
+                            Upload an image of your schedule. Our AI will analyze the image and automatically extract class details.
+                        </p>
+                        <div class="border-4 border-dashed border-indigo-300 rounded-2xl p-8 sm:p-12 text-center transition duration-300 shadow-lg 
+                                   bg-indigo-50/50 hover:bg-indigo-100/70">
+                            
+                            <input type="file" id="file-upload" accept="image/png, image/jpeg" class="hidden">
+                            <label for="file-upload" id="upload-label" class="cursor-pointer inline-flex items-center bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-10 rounded-xl shadow-2xl transition duration-300 transform hover:scale-[1.03]" title="Upload Timetable Image">
+                                <div id="loading-content" class="flex items-center hidden">
+                                    <div class="loading-spinner mr-3"></div>
+                                    Analyzing Timetable...
+                                </div>
+                                <div id="upload-content" class="flex items-center">
+                                    <svg class="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                                    Upload Timetable Image
+                                </div>
+                            </label>
+                            <p class="text-sm text-gray-500 mt-5">PNG or JPEG format. Max file size 4MB.</p>
+                        </div>
+                    </div>
+
+                    <div id="step-2" class="space-y-6 hidden">
+                        <h2 class="text-2xl font-semibold text-gray-800">Review and Refine Schedule</h2>
+                        <p class="text-gray-600">
+                            Check the extracted data below. Edit any incorrect fields (Day, Time, Subject, or Location) for accurate calendar syncing.
+                        </p>
+
+                        <div class="overflow-x-auto rounded-xl shadow-inner border border-gray-200">
+                            <table class="w-full bg-white timetable-table text-sm">
+                                <thead class="bg-gray-100 border-b border-gray-300 hidden md:table-header-group">
+                                    <tr>
+                                        <th class="font-bold text-gray-700 uppercase tracking-wider text-center p-4">Day</th>
+                                        <th class="font-bold text-gray-700 uppercase tracking-wider text-center p-4">Time</th>
+                                        <th class="font-bold text-gray-700 uppercase tracking-wider text-center p-4">Subject</th>
+                                        <th class="font-bold text-gray-700 uppercase tracking-wider text-center p-4">Location</th>
+                                        <th class="p-4"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="timetable-data-body">
+                                    </tbody>
+                            </table>
+                        </div>
+                        
+                        <div class="flex flex-col sm:flex-row justify-between pt-4 space-y-3 sm:space-y-0">
+                            <button onclick="setCurrentStep(1, true)" class="w-full sm:w-auto bg-gray-500 hover:bg-gray-600 text-white font-semibold py-3 px-6 rounded-xl transition duration-300 shadow-md transform hover:scale-[1.01]">
+                                &larr; Re-Upload Timetable
+                            </button>
+                            <button id="next-step-3-button" onclick="setCurrentStep(3, true)" disabled class="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl shadow-xl transition duration-300 disabled:opacity-50 transform hover:scale-[1.01] hover:shadow-2xl">
+                                Export Calendar &rarr;
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="step-3" class="space-y-8 hidden">
+                        <h2 class="text-2xl font-semibold text-gray-800">3. Final Step: Export iCalendar File</h2>
+                        
+                        <div class="p-8 bg-teal-50 border border-teal-300 rounded-2xl shadow-xl flex flex-col items-center text-center space-y-5">
+                            <h3 class="text-2xl font-black text-teal-800 flex items-center space-x-3">
+                                <svg class="w-8 h-8 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                <span>Universal .ics Download</span>
+                            </h3>
+                            <p class="text-lg text-gray-600">
+                                The **iCalendar (.ics)** file is the industry standard for calendar data. It includes all your weekly recurring classes.
+                                <br class="hidden sm:inline"> Download this file and open it to import your entire schedule into Google, Outlook, or Apple Calendar.
+                            </p>
+                            <button id="download-ics-button" onclick="downloadICS()" disabled class="w-full max-w-xs md:max-w-md bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700 text-white font-extrabold text-lg py-4 px-8 rounded-xl shadow-2xl transition duration-300 disabled:opacity-50 flex items-center justify-center space-x-3 transform hover:scale-[1.02]">
+                                <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                <span>Download Timetable (.ics)</span>
+                            </button>
+                        </div>
+
+                        <div class="pt-4">
+                            <button onclick="setCurrentStep(2, false)" class="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-3 px-6 rounded-xl transition duration-300 shadow-md transform hover:scale-[1.01]">
+                                &larr; Back to Edit
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+        
+        <footer class="bg-gray-100/50 border-t border-gray-200 py-6 mt-12">
+            <div class="w-full max-w-sm sm:max-w-xl md:max-w-3xl lg:max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center sm:flex sm:justify-between sm:items-center">
+                <p class="text-sm text-gray-500 mb-3 sm:mb-0">
+                    &copy; <span id="current-year"></span> sahiko.org
+                </p>
+                <nav>
+                    <a href="/about" class="text-sm font-medium text-indigo-600 hover:text-indigo-700 transition duration-150">
+                        About Us
+                    </a>
+                </nav>
+            </div>
+        </footer>
+        </div>
+
+    <script>
+        const initialData = JSON.parse('{{ initial_data | tojson | safe }}');
+        let currentStep = initialData.currentStep || 1;
+        let timetableData = initialData.timetableData || [];
+        let isLoading = false;
+        // Removed: let isDarkMode = false;
+        const stepsConfig = [
+            { id: 1, title: 'Upload Timetable Image' },
+            { id: 2, title: 'Review & Edit Data' },
+            { id: 3, title: 'Export iCalendar File' },
+        ];
+        const dayOrder = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+
+        // --- Core Functions ---
+
+        /** Updates the entire UI based on the current state. */
+        function updateUI() {
+            // 1. Removed Dark Mode Icon Logic
+
+            // 2. Step Views
+            document.querySelectorAll('#step-views > div').forEach(div => {
+                div.classList.add('hidden');
+            });
+            document.getElementById(`step-${currentStep}`).classList.remove('hidden');
+
+            // 3. Step Indicator
+            const stepContainer = document.querySelector('.flex.justify-between.items-center.mb-12');
+            stepContainer.innerHTML = '<div class="absolute w-full h-1 bg-gray-200 top-5 left-0 -z-10"></div>' + generateStepsHtml();
+
+            // 4. Step 1 (Upload) Button State
+            const uploadLabel = document.getElementById('upload-label');
+            const loadingContent = document.getElementById('loading-content');
+            const uploadContent = document.getElementById('upload-content');
+            if (uploadLabel) {
+                uploadLabel.classList.toggle('opacity-60', isLoading);
+                uploadLabel.classList.toggle('pointer-events-none', isLoading);
+            }
+            if (loadingContent) loadingContent.classList.toggle('hidden', !isLoading);
+            if (uploadContent) uploadContent.classList.toggle('hidden', isLoading);
+
+            // 5. Step 2 (Table) and Buttons
+            renderTimetableTable();
+
+            const nextStep3Button = document.getElementById('next-step-3-button');
+            if (nextStep3Button) {
+                nextStep3Button.disabled = timetableData.length === 0;
+            }
+            const downloadButton = document.getElementById('download-ics-button');
+            if (downloadButton) {
+                downloadButton.disabled = timetableData.length === 0;
+            }
+        }
+
+        /** Helper to generate the HTML for the Step Indicator. */
+        function generateStepsHtml() {
+            return stepsConfig.map(step => {
+                let stepClass = 'step-inactive';
+                let iconHtml = step.id;
+                
+                if (step.id === currentStep) {
+                    stepClass = 'step-active';
+                } else if (step.id < currentStep) {
+                    stepClass = 'step-complete';
+                    iconHtml = '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
+                }
+
+                const titleClass = currentStep === step.id 
+                    ? 'text-indigo-600' 
+                    : 'text-gray-700';
+
+                return `
+                    <div class="flex flex-col items-center flex-1 mx-2 sm:mx-4 z-10">
+                        <div class="step-indicator w-10 h-10 flex items-center justify-center rounded-full font-extrabold text-sm transition-all duration-500 ease-in-out shadow-md ${stepClass}">
+                            ${iconHtml}
+                        </div>
+                        <span class="mt-3 text-xs sm:text-sm font-semibold text-center leading-tight transition-colors ${titleClass}">
+                            ${step.title}
+                        </span>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        /** Renders the editable table rows for Step 2. */
+        function renderTimetableTable() {
+            const tableBody = document.getElementById('timetable-data-body');
+            if (!tableBody) return;
+
+            // 1. Sort the data before rendering
+            const sortedData = [...timetableData].sort((a, b) => {
+                const dayA = a.day.toLowerCase();
+                const dayB = b.day.toLowerCase();
+                const indexA = dayOrder.indexOf(dayA);
+                const indexB = dayOrder.indexOf(dayB);
+
+                if (indexA !== indexB) {
+                    if (indexA === -1 && indexB === -1) return 0;
+                    if (indexA === -1) return 1;
+                    if (indexB === -1) return -1;
+                    return indexA - indexB;
+                }
+
+                // Secondary sort: by start time (simple string comparison for HH:MM is usually enough)
+                const startAStr = a.time.split('-')[0] || '';
+                const startBStr = b.time.split('-')[0] || '';
+
+                if (startAStr && startBStr) {
+                    return startAStr.localeCompare(startBStr);
+                }
+
+                return 0;
+            });
+
+            // 2. Generate HTML
+            if (sortedData.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="5" class="p-6 text-center text-gray-500 italic">No schedule entries found or added.</td></tr>';
+                return;
+            }
+
+            tableBody.innerHTML = sortedData.map((item, index) => {
+                // Find the original index for removal in the UNSORTED timetableData array
+                const originalIndex = timetableData.findIndex(d => 
+                    d.day === item.day && d.time === item.time && d.subject === item.subject && d.location === item.location
+                );
+
+                return `
+                    <tr class="border-b md:border-b-0 transition duration-150 bg-white hover:bg-indigo-50/50">
+                        <td class="block md:table-cell p-3 md:p-4 relative" data-label="Day">
+                            <span class="md:hidden font-semibold text-indigo-600 mr-2">Day:</span>
+                            <input type="text" value="${item.day}" onchange="updateEntry(${originalIndex}, 'day', this.value)" class="w-full font-medium rounded-xl p-2 bg-gray-50" placeholder="Monday">
+                        </td>
+                        <td class="block md:table-cell p-3 md:p-4 relative" data-label="Time">
+                            <span class="md:hidden font-semibold text-indigo-600 mr-2">Time:</span>
+                            <input type="text" value="${item.time}" onchange="updateEntry(${originalIndex}, 'time', this.value)" class="w-full font-medium rounded-xl p-2 bg-gray-50" placeholder="HH:MM-HH:MM">
+                        </td>
+                        <td class="block md:table-cell p-3 md:p-4 relative" data-label="Subject">
+                            <span class="md:hidden font-semibold text-indigo-600 mr-2">Subject:</span>
+                            <input type="text" value="${item.subject}" onchange="updateEntry(${originalIndex}, 'subject', this.value)" class="w-full font-medium rounded-xl p-2 bg-gray-50" placeholder="Class Name">
+                        </td>
+                        <td class="block md:table-cell p-3 md:p-4 relative" data-label="Location">
+                            <span class="md:hidden font-semibold text-indigo-600 mr-2">Location:</span>
+                            <input type="text" value="${item.location}" onchange="updateEntry(${originalIndex}, 'location', this.value)" class="w-full font-medium rounded-xl p-2 bg-gray-50" placeholder="Room/Link">
+                        </td>
+                        <td class="p-3 md:p-4 w-10 text-right">
+                            <button onclick="removeEntry(${originalIndex})" class="text-red-500 hover:text-white hover:bg-red-500 p-2 rounded-full transition duration-150" title="Remove Entry">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3m4 0h-4"></path></svg>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        /** Changes the current step and optionally saves data to the server. */
+        async function setCurrentStep(step, shouldUpdateData) {
+            if (shouldUpdateData && currentStep === 2) {
+                // Only update data when moving from Step 2
+                await saveTimetableData(step);
+            } else {
+                currentStep = step;
+                showMessage(null); // Clear any existing messages
+                updateUI();
+            }
+        }
+
+        /** Shows a message in the global message box. */
+        function showMessage(text, classes = 'bg-blue-100 text-blue-800', duration = 5000) {
+            const msgBox = document.getElementById('message-box');
+            
+            if (!text) {
+                msgBox.classList.add('hidden');
+                return;
+            }
+
+            // relying on light mode classes
+            const finalClasses = classes;
+            
+            msgBox.className = `mb-6 p-4 rounded-xl transition-all duration-300 shadow-inner ${finalClasses}`;
+            msgBox.innerHTML = text;
+            msgBox.classList.remove('hidden');
+
+            if (duration > 0) {
+                setTimeout(() => {
+                    if (document.getElementById('message-box').innerHTML === text) {
+                         document.getElementById('message-box').classList.add('hidden');
+                    }
+                }, duration);
+            }
+        }
+
+        // Logic: File Upload and API Call ---
+
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (!file.type.startsWith('image/') || file.size > 4 * 1024 * 1024) {
+                showMessage("Please upload a PNG or JPEG file under 4MB.", 'bg-yellow-100 text-yellow-800');
+                event.target.value = ''; 
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                isLoading = true;
+                showMessage("Image loaded. Analyzing timetable structure...", 'bg-blue-100 text-blue-800', 0);
+                updateUI();
+                
+                const response = await fetch('/api/upload_and_analyze', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+
+                if (result.success) {
+                    timetableData = result.timetableData;
+                    currentStep = result.currentStep;
+                    showMessage(result.message, 'bg-green-100 text-green-800');
+                } else {
+                    if (response.status === 200) { // Success but no data found
+                        showMessage(result.message, 'bg-yellow-100 text-yellow-800');
+                    } else { // Server/API error
+                        showMessage(result.message, 'bg-red-100 text-red-800', 0);
+                    }
+                }
+            } catch (error) {
+                console.error("File upload or API error:", error);
+                showMessage("An unexpected network error occurred during analysis.", 'bg-red-100 text-red-800', 0);
+            } finally {
+                isLoading = false;
+                event.target.value = ''; // Clear input
+                updateUI();
+            }
+        }
+
+        //  Logic: Data Editing and Saving ---
+
+        /** Updates a single entry in the timetableData array. */
+        function updateEntry(index, key, value) {
+            if (timetableData[index]) {
+                // Update the original, unsorted array
+                timetableData[index][key] = value;
+                renderTimetableTable(); // Re-render to show potential change in sort order
+            }
+        }
+
+        /** Removes an entry from the timetableData array. */
+        function removeEntry(index) {
+            timetableData.splice(index, 1);
+            showMessage("Entry removed.", 'bg-red-100 text-red-700', 2000);
+            renderTimetableTable(); // Re-render immediately
+            
+            // Check if we need to disable the next button
+            const nextStep3Button = document.getElementById('next-step-3-button');
+            if (nextStep3Button) {
+                nextStep3Button.disabled = timetableData.length === 0;
+            }
+        }
+
+        /** Saves the current timetable data and step to the Flask session. */
+        async function saveTimetableData(nextStep) {
+            // A simple validation: ensure all fields are strings
+            const cleanedData = timetableData.map(item => ({
+                day: String(item.day || ''),
+                time: String(item.time || ''),
+                subject: String(item.subject || ''),
+                location: String(item.location || '')
+            }));
+
+            try {
+                const response = await fetch('/api/update_data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        timetableData: cleanedData, 
+                        currentStep: nextStep 
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    currentStep = result.currentStep;
+                    showMessage(`Data successfully saved! Moving to Step ${currentStep}.`, 'bg-green-100 text-green-800', 3000);
+                    updateUI();
+                } else {
+                    showMessage(`Error saving data: ${result.message}`, 'bg-red-100 text-red-800', 0);
+                }
+            } catch (error) {
+                console.error("Data update error:", error);
+                showMessage("Failed to communicate with the server to save data.", 'bg-red-100 text-red-800', 0);
+            }
+        }
+        
+        //  Logic: Download ICS ---
+
+        function downloadICS() {
+            if (timetableData.length === 0) {
+                showMessage("Cannot create calendar file: Timetable is empty.", 'bg-yellow-100 text-yellow-800');
+                return;
+            }
+            
+            // Trigger the server-side file download route
+            const downloadUrl = '/download_ics';
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = 'timetable_schedule.ics'; 
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+
+            showMessage("iCalendar file downloaded! Check your downloads—it should open automatically in your calendar app for confirmation.", 'bg-green-100 text-green-800', 8000);
+        }
+        
+        // --- Initialization and Event Listeners ---
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Set current year in the footer
+            document.getElementById('current-year').textContent = new Date().getFullYear();
+            
+            // Initial UI rendering
+            updateUI();
+
+            // Event listener for file upload
+            document.getElementById('file-upload').addEventListener('change', handleFileUpload);
+            
+            // Removed: Event listener for dark mode toggle
+        });
+
+    </script>
+</body>
+</html>
