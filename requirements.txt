@@ -2,3 +2,5 @@ flask
 gunicorn
 requests
 python-dotenv
+pdf2image
+Pillow

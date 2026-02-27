@@ -4,18 +4,24 @@ import base64
 import time
 from datetime import datetime, timedelta
 import requests
+import io
+from PIL import Image
+from pdf2image import convert_from_bytes
 from flask import Flask, render_template, request, jsonify, send_file, session
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24) 
 
 # --- Constants & Configuration ---
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key="
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # Current Groq vision model
+
+
 
 # Interface for TimetableEntry (Used for type hinting and schema)
 TIMETABLE_ENTRY_SCHEMA = {
@@ -155,68 +161,117 @@ def upload_and_analyze():
     if file.content_length > 4 * 1024 * 1024:
         return jsonify({'success': False, 'message': 'File size must be under 4MB.'}), 400
 
-    if not file.mimetype.startswith('image/'):
-        return jsonify({'success': False, 'message': 'Please upload an image file.'}), 400
+    if not (file.mimetype.startswith('image/') or file.mimetype == 'application/pdf'):
+        return jsonify({'success': False, 'message': 'Please upload an image or PDF file.'}), 400
 
     try:
-        base64_image, mime_type = file_to_base64(file)
+        image_parts = []
+        if file.mimetype == 'application/pdf':
+            # Convert PDF pages to images
+            pdf_bytes = file.read()
+            images = convert_from_bytes(pdf_bytes)
+            # Limit to first 5 pages to avoid massive payloads
+            for img in images[:5]:
+                buffered = io.BytesIO()
+                img.save(buffered, format="JPEG")
+                img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                image_parts.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{img_base64}"
+                    }
+                })
+        else:
+            base64_image, mime_type = file_to_base64(file)
+            image_parts.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{mime_type};base64,{base64_image}"
+                }
+            })
     except Exception as e:
-        return jsonify({'success': False, 'message': f'File reading error: {str(e)}'}), 500
+        return jsonify({'success': False, 'message': f'File reading/conversion error: {str(e)}'}), 500
 
-    #  Gemini API Call Logic 
-    api_key = GEMINI_API_KEY
+
+    # Groq API Call Logic
+    api_key = GROQ_API_KEY
     if not api_key:
-        return jsonify({'success': False, 'message': 'GEMINI_API_KEY is not configured on the server.'}), 500
+        return jsonify({'success': False, 'message': 'GROQ_API_KEY is not configured on the server.'}), 500
 
-    system_instruction = "You are an expert timetable parser. Analyze the provided image of a time table and extract all classes/events. Return the data as a single JSON array, conforming strictly to the provided schema. The 'day' must be the full day name (e.g., 'Monday'), 'time' must be in HH:MM-HH:MM 24-hour format (e.g., '10:00-11:30'), 'subject' is the class title, and 'location' is the room/link. If any data is missing, use an empty string for that field."
+    system_instruction = (
+        "You are an elite timetable parsing intelligence. Your goal is to convert any visual timetable (grid, list, or freeform) into a strict JSON format.\n\n"
+        "### EXTRACTION RULES:\n"
+        "1. **Day**: Identify the day of the week. Expand abbreviations (e.g., 'Mon' -> 'Monday').\n"
+        "2. **Time**: Extract the time range. Convert to 24-hour format (HH:MM-HH:MM). If only a start time is given, assume a 1-hour duration. Handle formats like '9am - 10:30am' -> '09:00-10:30'.\n"
+        "3. **Subject**: The core name of the class or event.\n"
+        "4. **Location**: Room number, building, or digital link. Use an empty string if not found.\n"
+        "5. **Empty Cells**: In grid layouts, if a cell is empty or 'No Class', ignore it.\n"
+        "6. **Multi-slot**: If one entry spans multiple days or times, create separate entries for each.\n\n"
+        "### OUTPUT FORMAT:\n"
+        "Return ONLY a JSON object with this key: {\"timetable\": [{\"day\": \"...\", \"time\": \"...\", \"subject\": \"...\", \"location\": \"...\"}]}. "
+        "Do not include any preamble, markdown formatting, or explanations."
+    )
     
     payload = {
-        "contents": [
+        "model": GROQ_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": system_instruction
+            },
             {
                 "role": "user",
-                "parts": [
-                    {"text": "Extract the structured time table from this image. Ensure time format is HH:MM-HH:MM, day is full name, and extract only the day, time, subject, and location."},
+                "content": [
                     {
-                        "inlineData": {
-                            "mimeType": mime_type,
-                            "data": base64_image
-                        }
-                    }
+                        "type": "text",
+                        "text": "Extract the structured timetable from this image(s). Return ONLY a JSON object like: {\"timetable\": [{\"day\": \"Monday\", \"time\": \"09:00-10:30\", \"subject\": \"Math\", \"location\": \"Room 101\"}]}. Use HH:MM-HH:MM for time, full day names."
+                    },
+                    *image_parts
                 ]
             }
         ],
-        "systemInstruction": {"parts": [{"text": system_instruction}]},
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "responseSchema": {
-                "type": "array", 
-                "items": {
-                    "type": "object", 
-                    "properties": TIMETABLE_ENTRY_SCHEMA,
-                    "required": list(TIMETABLE_ENTRY_SCHEMA.keys()) 
-                }
-            }
-        }
+        "temperature": 0
     }
 
     try:
-        response = requests.post(GEMINI_API_URL + api_key, headers={'Content-Type': 'application/json'}, data=json.dumps(payload))
+        response = requests.post(
+            GROQ_API_URL,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            },
+            data=json.dumps(payload)
+        )
         response.raise_for_status()
         result = response.json()
         
-        json_text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text')
+        # Grok response structure (OpenAI-compatible)
+        content_text = result.get('choices', [{}])[0].get('message', {}).get('content', '')
 
-        if not json_text:
+        if not content_text:
             raise ValueError("API response was empty or malformed.")
 
-        # Clean up markdown fences
-        if json_text.startswith("```json"):
-            json_text = json_text[7:]
-        if json_text.endswith("```"):
-            json_text = json_text[:-3]
+        # Grok might return just the array or a wrapped object depending on prompt
+        # But we requested json_object, so it should be a valid JSON string.
+        # Robust JSON extraction: Handle markdown blocks if the AI includes them
+        import re
+        json_match = re.search(r'\{.*\}', content_text, re.DOTALL)
+        if json_match:
+            try:
+                parsed_json = json.loads(json_match.group())
+            except json.JSONDecodeError:
+                # Fallback to simple load if regex extraction fails
+                parsed_json = json.loads(content_text)
+        else:
+            parsed_json = json.loads(content_text)
+        
+        if isinstance(parsed_json, dict) and "timetable" in parsed_json:
+            valid_data = parsed_json["timetable"]
+        elif isinstance(parsed_json, list):
+            valid_data = parsed_json
+        else:
+            valid_data = [parsed_json] if isinstance(parsed_json, dict) else []
 
-        parsed_data = json.loads(json_text)
-        valid_data = parsed_data if isinstance(parsed_data, list) else []
 
         if not valid_data:
             return jsonify({'success': False, 'message': 'Analysis complete, but no schedule items were found.'}), 200
@@ -234,8 +289,9 @@ def upload_and_analyze():
         }), 200
 
     except requests.exceptions.HTTPError as e:
-        error_message = f"Gemini API HTTP Error: {e.response.status_code} - {e.response.text}"
+        error_message = f"Groq API HTTP Error: {e.response.status_code} - {e.response.text}"
         return jsonify({'success': False, 'message': error_message}), 500
+
     except Exception as e:
         return jsonify({'success': False, 'message': f'Analysis failed: {str(e)}'}), 500
 
@@ -264,23 +320,19 @@ def update_data():
 
 @app.route('/download_ics')
 def download_ics():
-    """Generates and serves the .ics file based on current session data."""
+    """Generates and serves the .ics file as a download attachment."""
     timetable_data = session.get('timetable_data', [])
 
     if not timetable_data:
-        # This case should be handled by the frontend before calling this endpoint, but we check anyway
         return "Timetable data is empty.", 400
 
-    # Use a dummy ID for UID generation
     app_id = "flask-timetable-pro" 
     ics_content = generate_ics_content(timetable_data, app_id)
 
-    # Save content to a temporary file
     temp_filename = 'timetable_schedule.ics'
     with open(temp_filename, 'w') as f:
         f.write(ics_content)
     
-    # Send the file and clean up
     response = send_file(
         temp_filename,
         mimetype='text/calendar',
@@ -288,7 +340,6 @@ def download_ics():
         download_name='timetable_schedule.ics'
     )
 
-    # Use a response context to ensure file deletion after sending
     @response.call_on_close
     def remove_file():
         try:
@@ -298,11 +349,28 @@ def download_ics():
             
     return response
 
-from flask import render_template
 
-@app.route('/about')
-def about_page():
-    return render_template('about.html')
+@app.route('/open_ics')
+def open_ics():
+    """Serves the .ics file inline so the OS opens it with the default calendar app."""
+    timetable_data = session.get('timetable_data', [])
+
+    if not timetable_data:
+        return "Timetable data is empty.", 400
+
+    app_id = "flask-timetable-pro"
+    ics_content = generate_ics_content(timetable_data, app_id)
+
+    from flask import Response
+    return Response(
+        ics_content,
+        mimetype='text/calendar',
+        headers={
+            'Content-Disposition': 'inline; filename="timetable_schedule.ics"'
+        }
+    )
+
+from flask import render_template
 
 
 if __name__ == '__main__':
